@@ -17,7 +17,7 @@ import (
 
 var currentTotalTweets = 0
 var currentTweetNumber = 0
-var currentMinute = 1
+var currentMinute = 0
 
 type tweet struct {
 	Text  string `json:"text"`
@@ -29,8 +29,8 @@ type stats struct {
 	Tweets int `json:"tweets"`
 }
 
-var tweetList = make([]tweet, 10000)
-var statsList = make([]stats, 151)
+var tweetList = make([]tweet, 0, 10000)
+var statsList = make([]stats, 0, 151)
 
 // Used to prevent race conditions
 var mux sync.Mutex
@@ -86,6 +86,16 @@ func main() {
 	c := cron.New()
 	c.AddFunc("*/1 * * * *", func() {
 		mux.Lock()
+		// This block ensures that the we will only start recording data after the
+		// start of the first minute after the tool starts, since cron runs at the
+		// beginning of each minute.
+		if currentMinute == 0 {
+			go demux.HandleChan(tweetStream.Messages)
+			currentMinute++
+			mux.Unlock()
+			return
+		}
+
 		// Add tweets for the current minute to the total amount
 		currentTotalTweets += currentTweetNumber
 
@@ -116,7 +126,7 @@ func main() {
 		// Set up for next minute
 		currentMinute++
 		currentTweetNumber = 0
-		tweetList = make([]tweet, 10000) // Probably not the best way to do this but oh well
+		tweetList = make([]tweet, 0, 10000) // Probably not the best way to do this but oh well
 
 		// Exit after we have completed 150 minutes
 		if currentMinute == 151 {
@@ -142,7 +152,7 @@ func main() {
 		mux.Unlock()
 	})
 
-	go demux.HandleChan(tweetStream.Messages)
+	c.Start()
 
 	// Taken from go-twitter documentation:
 	// Wait for SIGINT and SIGTERM (HIT CTRL-C)
